@@ -11,18 +11,20 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Secret string                `json:"secret"`
-	Repos  map[string]RepoConfig `json:"repos"`
+	Secret      string                `json:"secret"`
+	CurrentPort string                `json:"current_port"`
+	Repos       map[string]RepoConfig `json:"repos"`
 }
 
 type RepoConfig struct {
 	Branch string `json:"branch"`
 	Path   string `json:"path"`
-	Script string `json:"script"`
+	Ports  [2]int `json:"ports"`
 }
 
 var config Config
@@ -38,8 +40,8 @@ func main() {
 	}
 
 	http.HandleFunc("/webhook", handleWebhook)
-	fmt.Println("Servidor ouvindo na porta 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	fmt.Println("Servidor ouvindo na porta ", config.CurrentPort)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", config.CurrentPort), nil))
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -87,8 +89,11 @@ func verifySignature(signature string, body, secret []byte) bool {
 
 func deploy(repo RepoConfig) {
 	fmt.Println("Executando deploy para", repo.Path)
-	cmd := exec.Command("bash", repo.Script)
-	cmd.Dir = repo.Path
+	port1 := strconv.Itoa(repo.Ports[0])
+	port2 := strconv.Itoa(repo.Ports[1])
+
+	cmd := exec.Command("bash", "./up-docker.sh", port1, port2)
+	cmd.Dir = "./"
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Println("Erro:", err)
