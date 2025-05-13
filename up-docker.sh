@@ -4,6 +4,8 @@ set -x
 
 cd $1
 
+git pull
+
 docker stop $2
 
 docker remove $2
