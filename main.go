@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Config struct {
@@ -39,24 +41,32 @@ func main() {
 		log.Fatal("Erro ao parsear config:", err)
 	}
 
-	http.HandleFunc("/webhook", handleWebhook)
-	fmt.Println("Servidor ouvindo na porta ", config.CurrentPort)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", config.CurrentPort), nil))
+	r := gin.Default()
+
+	r.POST("/webhook", handleWebhook)
+
+	fmt.Println("Servidor ouvindo na porta", config.CurrentPort)
+	if err := r.Run(":" + config.CurrentPort); err != nil {
+		log.Fatal("Erro ao iniciar servidor:", err)
+	}
 }
 
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
-	signature := r.Header.Get("X-Hub-Signature-256")
+func handleWebhook(c *gin.Context) {
+	signature := c.GetHeader("X-Hub-Signature-256")
 	if signature == "" {
-		http.Error(w, "Sem assinatura", http.StatusForbidden)
+		c.String(http.StatusForbidden, "Sem assinatura")
 		return
 	}
 
-	body, _ := ioutil.ReadAll(r.Body)
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+	body, err := c.GetRawData()
+	if err != nil {
+		c.String(http.StatusBadRequest, "Erro ao ler corpo da requisição")
+		return
+	}
 
 	// Verifica assinatura
 	if !verifySignature(signature, body, []byte(config.Secret)) {
-		http.Error(w, "Assinatura inválida", http.StatusForbidden)
+		c.String(http.StatusForbidden, "Assinatura inválida")
 		return
 	}
 
@@ -66,18 +76,20 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 			FullName string `json:"full_name"`
 		} `json:"repository"`
 	}
+
 	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, "Payload inválido", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "Payload inválido")
 		return
 	}
 
 	repo := payload.Repository.FullName
 	branch := strings.TrimPrefix(payload.Ref, "refs/heads/")
+
 	if repoConf, ok := config.Repos[repo]; ok && repoConf.Branch == branch {
 		go deploy(repoConf)
 	}
 
-	w.WriteHeader(http.StatusOK)
+	c.Status(http.StatusOK)
 }
 
 func verifySignature(signature string, body, secret []byte) bool {
@@ -89,11 +101,13 @@ func verifySignature(signature string, body, secret []byte) bool {
 
 func deploy(repo RepoConfig) {
 	fmt.Println("Executando deploy para", repo.Path)
+
 	port1 := strconv.Itoa(repo.Ports[0])
 	port2 := strconv.Itoa(repo.Ports[1])
 
 	cmd := exec.Command("bash", "./up-docker.sh", port1, port2)
-	cmd.Dir = "./"
+	cmd.Dir = repo.Path // melhor que "./", para garantir que está no projeto certo
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Println("Erro:", err)
