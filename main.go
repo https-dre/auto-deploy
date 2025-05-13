@@ -105,7 +105,7 @@ func deploy(repo RepoConfig) {
 	port2 := strconv.Itoa(repo.Ports[1])
 
 	cmd := exec.Command("bash", "./up-docker.sh", port1, port2)
-	cmd.Dir = repo.Path // melhor que "./", para garantir que está no projeto certo
+	cmd.Dir = "./"
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
